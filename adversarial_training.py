@@ -28,7 +28,7 @@ set_seed()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
-# --- Load data ---
+# Load data
 train_df = pd.read_csv('hippocorpus_training_truncated.csv')
 train_df['label'] = (train_df['condition'] == 'deceptive').astype(int)
 
@@ -78,14 +78,8 @@ def train_epoch(model, loader, optimizer, loss_fn):
 
 def evaluate_loader(model, loader):
     """
-    Returns accuracy, weighted F1, ASR, ROC AUC, per-class metrics dict, and
-    the raw per-item 'wrong' boolean array (True = misclassified).
-    Per-class dict has keys 'precision', 'recall', 'f1' each as a list
-    indexed by class label [0, 1].
-    The 'wrong' array is needed for McNemar's test, which requires paired
-    per-item outcomes between two models evaluated on the same items in the
-    same order (guaranteed here since loaders are built once per fold and
-    reused across the base/human/llm/combined models).
+    Returns accuracy, weighted F1, ASR, ROC AUC, per-class metrics, and the
+    wrong item flags.
     """
     model.eval()
     preds, true_labels, probs = [], [], []
@@ -107,11 +101,11 @@ def evaluate_loader(model, loader):
     f1  = f1_score(true_labels, preds, average='weighted')
     asr = np.mean(wrong)
 
-    # ROC AUC — guard against single-class edge case in small held-out splits
+    # ROC AUC
     n_unique = len(np.unique(true_labels))
     auc = roc_auc_score(true_labels, probs) if n_unique > 1 else float('nan')
 
-    # Per-class precision, recall, F1
+    # Per-class metrics
     report = classification_report(true_labels, preds, output_dict=True, zero_division=0)
     per_class = {
         'precision': [report.get('0', {}).get('precision', float('nan')),
@@ -126,9 +120,7 @@ def evaluate_loader(model, loader):
 
 def cohen_h(p1, p2):
     """
-    Cohen's h effect size for the difference between two proportions.
-    h = 2 * arcsin(sqrt(p1)) - 2 * arcsin(sqrt(p2))
-    Positive h means p1 > p2 (i.e. ASR went up relative to base).
+    Cohen's h effect size.
     """
     p1 = np.clip(p1, 0.0, 1.0)
     p2 = np.clip(p2, 0.0, 1.0)
@@ -136,15 +128,7 @@ def cohen_h(p1, p2):
 
 def mcnemar_test(wrong_a, wrong_b):
     """
-    McNemar's test for paired binary outcomes (same items, two models).
-    wrong_a, wrong_b: boolean arrays, same length and order, True = misclassified.
-
-    Returns (statistic, p_value, b01, b10) where:
-      b01 = items model A got right but model B got wrong
-      b10 = items model A got wrong but model B got right
-    Uses the continuity-corrected chi-square statistic when the number of
-    discordant pairs is large enough (>= 25); otherwise falls back to the
-    exact binomial test, as is standard practice for small discordant counts.
+    McNemar's test for paired outcomes.
     """
     wrong_a = np.asarray(wrong_a, dtype=bool)
     wrong_b = np.asarray(wrong_b, dtype=bool)
@@ -168,9 +152,7 @@ def mcnemar_test(wrong_a, wrong_b):
 
 def cohens_g(b01, b10):
     """
-    Cohen's g effect size for McNemar designs.
-    g = proportion of discordant pairs favouring the larger side - 0.5
-    Range [0, 0.5]. Benchmarks (Cohen, 1988): 0.05 small, 0.15 medium, 0.25 large.
+    Cohen's g effect size.
     """
     n_discordant = b01 + b10
     if n_discordant == 0:
@@ -199,15 +181,15 @@ def finetune_model(paras_train, tokenizer):
 
     return model
 
-# Standard test set loader (same for all folds)
+# Standard test set
 tokenizer    = DistilBertTokenizer.from_pretrained('base_model')
 std_dataset  = NarrativeDataset(test_df['text_truncated'].tolist(), test_df['label'].tolist(), tokenizer)
 std_loader   = DataLoader(std_dataset, batch_size=16)
 
-# 5-fold cross-validation
+# Cross-validation
 kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
-# Store results per fold
+# Store fold results
 results = {
     'base':     {'acc': [], 'f1': [], 'auc': [],
                  'asr_human': [], 'asr_llm': [], 'asr_combined': [],
@@ -303,9 +285,7 @@ for fold in range(n_folds):
     results['combined']['per_class_std'].append(pc)
     results['combined']['wrong_human'].append(wrong_h); results['combined']['wrong_llm'].append(wrong_l); results['combined']['wrong_combined'].append(wrong_c)
 
-# ---------------------------------------------------------------------------
-# Summary table 1 — overall metrics
-# ---------------------------------------------------------------------------
+# Summary table 1
 print("\n" + "="*100)
 print("Results (averaged over 5 folds):")
 print(f"  {'Model':<22} {'Accuracy':>10} {'F1 (wtd)':>10} {'AUC':>8} {'ASR (human)':>13} {'ASR (LLM)':>11} {'ASR (combined)':>16}")
@@ -317,9 +297,7 @@ for name, key in [('Base model', 'base'), ('Human fine-tuned', 'human'), ('LLM f
 
 print("\nNote: ASR = proportion of held-out paraphrases that still fool the model. Lower = more robust.")
 
-# ---------------------------------------------------------------------------
-# Summary table 2 — per-class precision / recall / F1 on standard test set
-# ---------------------------------------------------------------------------
+# Summary table 2
 print("\n" + "="*100)
 print("Per-class metrics on standard test set (averaged over 5 folds):")
 print(f"  {'Model':<22} {'Class':>6} {'Precision':>11} {'Recall':>9} {'F1':>9}")
@@ -334,9 +312,7 @@ for name, key in [('Base model', 'base'), ('Human fine-tuned', 'human'), ('LLM f
         print(f"  {row_label:<22} {cls_name:>9} {mean_p:>11.4f} {mean_r:>9.4f} {mean_f:>9.4f}")
     print(f"  {'':<22}")   # blank separator between models
 
-# ---------------------------------------------------------------------------
-# Summary table 3 — Cohen's h effect sizes for ASR reductions vs base model
-# ---------------------------------------------------------------------------
+# Summary table 3
 print("="*100)
 print("Cohen's h effect sizes for ASR differences (fine-tuned vs base model):")
 print("  Negative h = lower ASR than base (more robust). |h|: 0.2 small, 0.5 medium, 0.8 large.")
@@ -356,15 +332,8 @@ for name, key in [('Human fine-tuned', 'human'), ('LLM fine-tuned', 'llm'), ('Co
 
 print()
 
-# ---------------------------------------------------------------------------
-# Summary table 4 — McNemar's test for ASR differences vs base model
-# ---------------------------------------------------------------------------
-# Per-item 'wrong' arrays are pooled across the 5 folds before testing, since
-# each fold holds out a different (non-overlapping) set of paraphrases; the
-# pairing required by McNemar's test (same items, two models) only needs to
-# hold within each fold, so concatenating across folds yields one valid long
-# paired vector per comparison. Cohen's g is reported alongside as the
-# corresponding effect size for this paired design.
+# Summary table 4
+# Wrong item arrays are pooled across folds for testing.
 print("="*100)
 print("McNemar's test for ASR differences (fine-tuned vs base model, pooled across folds):")
 print("  Tests whether a fine-tuned model is significantly more/less often fooled than the")
@@ -382,9 +351,7 @@ for name, key in [('Human fine-tuned', 'human'), ('LLM fine-tuned', 'llm'), ('Co
         print(f"  {name:<28} {test_label:<10} {stat:>10.4f} {p:>8.4f} {g:>8.4f}")
     print()
 
-# ---------------------------------------------------------------------------
-# Figure: grouped bar chart of ASR by model and paraphrase type
-# ---------------------------------------------------------------------------
+# ASR bar chart
 import matplotlib.pyplot as plt
 
 models_order = ['Base model', 'Human fine-tuned', 'LLM fine-tuned', 'Combined']

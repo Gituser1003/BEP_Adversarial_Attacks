@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 
 df = pd.read_csv('Data.csv')
 
@@ -34,7 +33,7 @@ print(f"  Human           : {len(human)}")
 print(f"  LLM             : {len(llm)}")
 
 
-# Helper: rank-biserial correlation effect size for Mann-Whitney U
+# Rank-biserial effect size
 def rank_biserial(u_stat, n1, n2):
     """r = 1 - (2U / (n1 * n2)). Range [-1, 1]; |r|: 0.1 small, 0.3 medium, 0.5 large."""
     return 1 - (2 * u_stat) / (n1 * n2)
@@ -56,7 +55,7 @@ contingency = np.array([
 ])
 chi2, p_asr, dof, _ = stats.chi2_contingency(contingency)
 
-# Effect size: Cramer's V for chi-square
+# Cramer's V
 n_total = grouped['total'].sum()
 cramers_v = np.sqrt(chi2 / n_total)
 print(f"\nChi-square: {chi2:.4f}, df={dof}, p={p_asr:.4f}")
@@ -64,7 +63,7 @@ print(f"Cramer's V (effect size): {cramers_v:.4f}")
 print("Significant (p<0.05):", p_asr < 0.05)
 
 
-# 2. Number of attempts (successful sequences only)
+# 2. Number of attempts
 print("\n2. Number of attempts (successful sequences only)")
 
 human_succ = human[human['asr'] == 1]
@@ -87,7 +86,7 @@ print(f"Rank-biserial r (effect size): {r_attempts:.4f}")
 print("Significant (p<0.05):", p_attempts_s < 0.05)
 
 
-# 3. Change in classifier's prediction confidence (successful sequences only)
+# 3. Confidence shift
 print("\n3. cp_delta_norm (successful sequences only)")
 
 for group, label in [(human_succ, 'Human'), (llm_succ, 'LLM')]:
@@ -131,18 +130,16 @@ summary = pd.DataFrame({
 print(summary.to_string(index=False))
 
 
-# ---------------------------------------------------------------------------
-# Figure: Three-panel comparison of humans vs LLM
-# ---------------------------------------------------------------------------
+# Figure
 
-# APA-style colours: muted blue and orange
+# Colours
 COLOR_HUMAN = '#4878CF'
 COLOR_LLM   = '#E87820'
 
 fig, axes = plt.subplots(1, 3, figsize=(11, 4.5))
 fig.subplots_adjust(wspace=0.42)
 
-# --- Panel 1: Success rate (bar chart) ---
+# Panel 1: Success rate
 ax1 = axes[0]
 sr_human = grouped.loc['human', 'success_rate_%']
 sr_llm   = grouped.loc['llm',   'success_rate_%']
@@ -155,12 +152,13 @@ ax1.spines['top'].set_visible(False)
 ax1.spines['right'].set_visible(False)
 ax1.yaxis.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
 ax1.set_axisbelow(True)
-# Annotate bars with values
+
+# Add values above bars
 for bar, val in zip(bars, [sr_human, sr_llm]):
     ax1.text(bar.get_x() + bar.get_width() / 2, val + 1.5,
              f'{val:.1f}%', ha='center', va='bottom', fontsize=9)
 
-# --- Panel 2: Number of attempts (boxplot) ---
+# Panel 2: Number of attempts
 ax2 = axes[1]
 bp2 = ax2.boxplot(
     [human_succ['n_attempts'].values, llm_succ['n_attempts'].values],
@@ -183,7 +181,7 @@ ax2.spines['right'].set_visible(False)
 ax2.yaxis.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
 ax2.set_axisbelow(True)
 
-# --- Panel 3: cp_delta_norm (boxplot) ---
+# Panel 3: Confidence shift
 ax3 = axes[2]
 bp3 = ax3.boxplot(
     [human_succ['best_cp_delta_norm'].values, llm_succ['best_cp_delta_norm'].values],
